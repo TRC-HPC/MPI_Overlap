@@ -19,6 +19,12 @@
 #define rank0_printf(...) if  (rank==0) {printf(__VA_ARGS__);}
 
 int data_elements = 0, nghb_size = 0;
+int world_size = 0, world_half = 0;
+bool onesided = false;
+bool onesided_w = false;
+bool twosided = false;
+bool twosided_w = false;
+bool persistent = false;
 
 
 void build_array(double* arr, int rank)
@@ -94,21 +100,6 @@ void exchange_twosided_sync(double* exchange_arr_send, double* exchange_arr_recv
     }
 }
 
-void chunk_send(double* buffer, int count, int chunk, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request* request)
-{
-	int idx = 0;
-
-	for(idx = 0; idx < count; idx += chunk)
-		MPI_Isend( &buffer[idx], fmin(chunk, count - idx), datatype, dest, tag++, comm, request++);
-}
-
-void chunk_recv(double* buffer, int count, int chunk, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Request* request)
-{
-	int size = sizeof(datatype), idx = 0;
-	for(idx = 0; idx < count; idx += chunk)
-		MPI_Irecv( &buffer[idx], fmin(chunk, count - idx), datatype, source, tag++, comm, request++);
-}
-
 void exchange_twosided(double* exchange_arr_send, double* exchange_arr_recv, MPI_Request* req_arr, int rank, int world_half, int target, int world_size)
 {
     int ret;
@@ -120,34 +111,15 @@ void exchange_twosided(double* exchange_arr_send, double* exchange_arr_recv, MPI
     MPI_Isend(exchange_arr_send, data_elements, MPI_DOUBLE, target, send_tag, MPI_COMM_WORLD, &req_arr[target]);
 }
 
-int main (int argc, char** argv)
+int parse_commandline(int argc, char** argv, int rank)
 {
-    MPI_Init(&argc, &argv);
-    int rank, world_size;
-
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-
-    if (world_size % 2)
-    {
-    	rank0_printf("Error: this program is meant to be run on an even number of ranks\n");
-        MPI_Finalize();
-        return 0;
-    }
-
     /* parse commandline arguments */
     rank0_printf("Parsing commandline arguments:\n");
-    bool onesided = false;
-    bool onesided_w = false;
-    bool twosided = false;
-    bool twosided_w = false;
-    bool persistent = false;
     if (argc < 4)
     {
         rank0_printf("Not enough arguments given.\n");
-        rank0_printf("Usage: %s %s %s %s\n", argv[0], "-algorithm (o,ow,t,tw)", "#data_elements", "#neighbors")
-        MPI_Finalize();
-        return 0;
+        rank0_printf("Usage: %s %s %s %s\n", argv[0], "-algorithm (o,ow,t,tw)", "#data_elements", "#neighbors");
+        return -1;
     }
     if (strcmp(argv[1], "-o") == 0)
     {
@@ -176,38 +148,30 @@ int main (int argc, char** argv)
     else
     {
         rank0_printf("Incorrect first argument given, choose from: onesided: -o, onesided_w: -ow, twosided: -t, twosided_w -tw, persistent -p\n");
-        MPI_Finalize();
-        return 0;
+        return -1;
     }
     
     data_elements = atoi(argv[2]);
     if(data_elements <= 0)
     {
         rank0_printf("Incorrect number of elements given: %d\n", data_elements);
-        MPI_Finalize();
-        return 0;
+        return -1;
     }
 
     nghb_size = atoi(argv[3]);
     if(nghb_size < 2)
     {
         rank0_printf("Incorrect number of neighbors given: %d\n", nghb_size);
-        MPI_Finalize();
-        return 0;
+        return -1;
     }
 
-    int world_half = world_size / 2;
+    return 0;
+}
 
-    if (world_half <= nghb_size)
-    {
-    	rank0_printf("Error: nghb_size=%d is too big compared to ranks/2 = %d\n", nghb_size, world_half);
-        MPI_Finalize();
-        return 0;
-    }
-
+int do_communication_pattern(int *targets, int world_size, int world_half, int rank)
+{
     /* create target ranks pool for each rank */
     int gtargets[world_size][world_half];
-    int targets[world_half];
 
     for(int k = 0; k < world_size; k++)
         for(int j = 0; j < world_half; j++)
@@ -283,9 +247,50 @@ int main (int argc, char** argv)
     fclose(franks);
 #endif
 
+    return 0;
+}
+
+int main (int argc, char** argv)
+{
+    MPI_Init(&argc, &argv);
+    int rank, world_size, world_half;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+    if (world_size % 2)
+    {
+    	rank0_printf("Error: this program is meant to be run on an even number of ranks\n");
+        MPI_Finalize();
+        return 0;
+    }
+
+    world_half = world_size / 2;
+
+    if(parse_commandline(argc, argv, rank))
+    {
+        MPI_Finalize();
+        return 0;
+    }
+
+    if (world_half <= nghb_size)
+    {
+    	rank0_printf("Error: nghb_size=%d is too big compared to ranks/2 = %d\n", nghb_size, world_half);
+        MPI_Finalize();
+        return 0;
+    }
+
+    int targets[world_half];
+    
+    if(do_communication_pattern(targets, world_size, world_half, rank))
+    {
+        MPI_Finalize();
+        return 0;
+    }
+
     /* Init arrays */
     rank0_printf("Allocating arrays:\n");
-    rank0_printf("\tEach send is of size = %d bytes\n", sizeof(double)*data_elements);
+    rank0_printf("\tEach array (send/recv) is of size = %d bytes\n", sizeof(double)*data_elements);
 
     double *arr = (double *)malloc(data_elements*sizeof(double));
     if(!arr)
@@ -331,6 +336,7 @@ int main (int argc, char** argv)
 
     for(unsigned int k = 0; k < nreq; k++)
         req_arr[k] = MPI_REQUEST_NULL;
+
 
     double iter_times[ITERATIONS];
 
