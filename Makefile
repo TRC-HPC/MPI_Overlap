@@ -1,5 +1,5 @@
 CC=mpicc
-FLAGS=-g -O0 -lm
+FLAGS=-g -O3 -lm
 
 all: regdata customdata
 

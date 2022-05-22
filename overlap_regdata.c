@@ -8,20 +8,22 @@
 #include <math.h>
 #include <time.h>
 
-#define SIZE       92400     // sizeof(cfdcell_v0)/sizeof(double)*400
 #define SLEEPTIME  50000
-#define ITERATIONS 300
+#define ITER_TRSH  1.0
+#define ITERATIONS 200
 #define WARMUP 5
 #define COMP_ITRS 250
 #define MAX_MPI_RANKS 		1000
 #define MAX_MPI_NEIGHBORS 	1000
-#define NGHB_SIZE           10
 
 #define rank0_printf(...) if  (rank==0) {printf(__VA_ARGS__);}
 
+int data_elements = 0, nghb_size = 0;
+
+
 void build_array(double* arr, int rank)
 {
-    for (int i = 0; i < SIZE; ++i)
+    for (int i = 0; i < data_elements; ++i)
     {
 	    arr[i] = rank;
     }
@@ -29,8 +31,9 @@ void build_array(double* arr, int rank)
 
 void compute(double* array, MPI_Request* req_arr)
 {
-    // usleep(SLEEPTIME);
-    // return;
+    usleep(SLEEPTIME);
+    return;
+
     int flag = 0;
     double val = array[0];
     int rank;
@@ -40,7 +43,7 @@ void compute(double* array, MPI_Request* req_arr)
     {
         //MPI_Iprobe(target, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, MPI_STATUS_IGNORE);
         //MPI_Testall(2, req_arr, &flag, MPI_STATUSES_IGNORE);
-        for (int j = 0; j < SIZE; ++j)
+        for (int j = 0; j < data_elements; ++j)
         {
             array[j] = rank;
         }
@@ -49,23 +52,23 @@ void compute(double* array, MPI_Request* req_arr)
 
 void init_onesided(double* exchange_arr_send, MPI_Win* window )
 {
-    MPI_Win_create(exchange_arr_send, SIZE*sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, window);	
+    MPI_Win_create(exchange_arr_send, data_elements*sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, window);	
 }
 
 void exchange_onesided(double* exchange_arr_send, double* exchange_arr_recv,
-		       MPI_Request* req_arr, MPI_Win* window, int rank, int stride, int target, int world_size)
+		       MPI_Request* req_arr, MPI_Win* window, int rank, int world_half, int target, int world_size)
 {
     int ret;
     {
-        MPI_Rget(exchange_arr_recv, SIZE, MPI_DOUBLE, target, 0, SIZE, MPI_DOUBLE, *window, &req_arr[target]);
+        MPI_Rget(exchange_arr_recv, data_elements, MPI_DOUBLE, target, 0, data_elements, MPI_DOUBLE, *window, &req_arr[target]);
     }
 }
 
-void init_persistent(double* exchange_arr_send, double* exchange_arr_recv, MPI_Request* req_arr, int rank, int stride, int target, int world_size)
+void init_persistent(double* exchange_arr_send, double* exchange_arr_recv, MPI_Request* req_arr, int rank, int world_half, int target, int world_size)
 {
     int ret;
-    MPI_Send_init(exchange_arr_send, SIZE, MPI_DOUBLE, target, 1, MPI_COMM_WORLD, &req_arr[0]);
-    MPI_Recv_init(exchange_arr_recv, SIZE, MPI_DOUBLE, target, 1, MPI_COMM_WORLD, &req_arr[1]);
+    MPI_Send_init(exchange_arr_send, data_elements, MPI_DOUBLE, target, 1, MPI_COMM_WORLD, &req_arr[0]);
+    MPI_Recv_init(exchange_arr_recv, data_elements, MPI_DOUBLE, target, 1, MPI_COMM_WORLD, &req_arr[1]);
 }
 
 void exchange_persistent(MPI_Request* req_arr)
@@ -73,18 +76,21 @@ void exchange_persistent(MPI_Request* req_arr)
     MPI_Startall(2,req_arr);
 }
 
-void exchange_twosided_sync(double* exchange_arr_send, double* exchange_arr_recv, MPI_Request* req_arr, int rank, int stride, int target, int world_size)
+void exchange_twosided_sync(double* exchange_arr_send, double* exchange_arr_recv, MPI_Request* req_arr, int rank, int world_half, int target, int world_size)
 {
     int ret;
-    if (rank < stride)
+    int send_tag = MAX_MPI_NEIGHBORS * rank + target;		
+    int recv_tag = rank + MAX_MPI_NEIGHBORS * target;
+
+    if (rank < world_half)
     {
-        MPI_Send(exchange_arr_send, SIZE, MPI_DOUBLE, target, 1, MPI_COMM_WORLD);
-        MPI_Recv(exchange_arr_recv, SIZE, MPI_DOUBLE, target, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(exchange_arr_send, data_elements, MPI_DOUBLE, target, send_tag, MPI_COMM_WORLD);
+        MPI_Recv(exchange_arr_recv, data_elements, MPI_DOUBLE, target, recv_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
     else
     {
-        MPI_Recv(exchange_arr_recv, SIZE, MPI_DOUBLE, target, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Send(exchange_arr_send, SIZE, MPI_DOUBLE, target, 1, MPI_COMM_WORLD);
+        MPI_Recv(exchange_arr_recv, data_elements, MPI_DOUBLE, target, recv_tag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(exchange_arr_send, data_elements, MPI_DOUBLE, target, send_tag, MPI_COMM_WORLD);
     }
 }
 
@@ -103,15 +109,15 @@ void chunk_recv(double* buffer, int count, int chunk, MPI_Datatype datatype, int
 		MPI_Irecv( &buffer[idx], fmin(chunk, count - idx), datatype, source, tag++, comm, request++);
 }
 
-void exchange_twosided(double* exchange_arr_send, double* exchange_arr_recv, MPI_Request* req_arr, int rank, int stride, int target, int world_size)
+void exchange_twosided(double* exchange_arr_send, double* exchange_arr_recv, MPI_Request* req_arr, int rank, int world_half, int target, int world_size)
 {
     int ret;
 
     int send_tag = MAX_MPI_NEIGHBORS * rank + target;		
     int recv_tag = rank + MAX_MPI_NEIGHBORS * target;
 
-    MPI_Irecv(exchange_arr_recv, SIZE, MPI_DOUBLE, target, recv_tag, MPI_COMM_WORLD, &req_arr[MAX_MPI_NEIGHBORS + target]);
-    MPI_Isend(exchange_arr_send, SIZE, MPI_DOUBLE, target, send_tag, MPI_COMM_WORLD, &req_arr[target]);
+    MPI_Irecv(exchange_arr_recv, data_elements, MPI_DOUBLE, target, recv_tag, MPI_COMM_WORLD, &req_arr[MAX_MPI_NEIGHBORS + target]);
+    MPI_Isend(exchange_arr_send, data_elements, MPI_DOUBLE, target, send_tag, MPI_COMM_WORLD, &req_arr[target]);
 }
 
 int main (int argc, char** argv)
@@ -125,41 +131,103 @@ int main (int argc, char** argv)
     if (world_size % 2)
     {
     	rank0_printf("Error: this program is meant to be run on an even number of ranks\n");
-    	MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    	MPI_Finalize();	    
+        MPI_Finalize();
+        return 0;
     }
 
-    int stride = world_size / 2;
-
-    if (stride <= NGHB_SIZE)
+    /* parse commandline arguments */
+    rank0_printf("Parsing commandline arguments:\n");
+    bool onesided = false;
+    bool onesided_w = false;
+    bool twosided = false;
+    bool twosided_w = false;
+    bool persistent = false;
+    if (argc < 4)
     {
-    	rank0_printf("Error: NGHB_SIZE=%d is too big compared to ranks/2 = %d\n", NGHB_SIZE, stride);
-    	MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    	MPI_Finalize();	    
+        rank0_printf("Not enough arguments given.\n");
+        rank0_printf("Usage: %s %s %s %s\n", argv[0], "-algorithm (o,ow,t,tw)", "#data_elements", "#neighbors")
+        MPI_Finalize();
+        return 0;
+    }
+    if (strcmp(argv[1], "-o") == 0)
+    {
+        onesided = true;
+        rank0_printf("\tUsing Onesided communication\n");
+    }
+    else if (strcmp(argv[1], "-ow") == 0){
+        onesided_w = true;
+        rank0_printf("\tUsing Onesided_wait communication\n");
+    }
+    else if (strcmp(argv[1], "-t") == 0)
+    {
+        twosided = true;
+        rank0_printf("\tUsing Twosided communication\n");
+    }
+    else if (strcmp(argv[1], "-tw") == 0)
+    {
+        twosided_w = true;
+        rank0_printf("\tUsing Twosided_wait communication\n");
+    }
+    else if (strcmp(argv[1], "-p") == 0)
+    {
+        twosided_w = true;
+        rank0_printf("\tUsing Persistent communication\n");
+    }    
+    else
+    {
+        rank0_printf("Incorrect first argument given, choose from: onesided: -o, onesided_w: -ow, twosided: -t, twosided_w -tw, persistent -p\n");
+        MPI_Finalize();
+        return 0;
+    }
+    
+    data_elements = atoi(argv[2]);
+    if(data_elements <= 0)
+    {
+        rank0_printf("Incorrect number of elements given: %d\n", data_elements);
+        MPI_Finalize();
+        return 0;
     }
 
-    rank0_printf("Each send is of size = %d\n", sizeof(double)*SIZE);
+    nghb_size = atoi(argv[3]);
+    if(nghb_size < 2)
+    {
+        rank0_printf("Incorrect number of neighbors given: %d\n", nghb_size);
+        MPI_Finalize();
+        return 0;
+    }
+
+    int world_half = world_size / 2;
+
+    if (world_half <= nghb_size)
+    {
+    	rank0_printf("Error: nghb_size=%d is too big compared to ranks/2 = %d\n", nghb_size, world_half);
+        MPI_Finalize();
+        return 0;
+    }
 
     /* create target ranks pool for each rank */
-    int gtargets[world_size][stride];
-    int targets[stride];
+    int gtargets[world_size][world_half];
+    int targets[world_half];
 
     for(int k = 0; k < world_size; k++)
-        for(int j = 0; j < stride; j++)
+        for(int j = 0; j < world_half; j++)
             gtargets[k][j] = -1;
 
 
+    /* rank 0 determines the communication pattern */
     if(rank == 0)
     {
+        rank0_printf("Assigning communication targets:\n");
         srand(time(NULL));
-        for(int crank = 0; crank < stride; crank++)
+        /* each rank in the first group (0 .. world_half) picks nghb_size random ranks from the other group (world_half .. world_size - 1) */
+        for(int crank = 0; crank < world_half; crank++)
         {
-            for(int k = 0; k < NGHB_SIZE; k++)
+            for(int k = 0; k < nghb_size; k++)
             {    
                 bool success = false;
                 do
                 {
-                    gtargets[crank][k] = rand() % (stride) + stride;
+                    gtargets[crank][k] = rand() % (world_half) + world_half;
 
                     int i;
                     for(i = 0; i < k; i++)
@@ -168,42 +236,82 @@ int main (int argc, char** argv)
                     if(i == k)
                         success = true;
                 } while (success == false);   
-
-                // rank0_printf("crank %d: target %d\n", crank, gtargets[crank][k]);
             }
         }
 
-        // assign reverse targets
-        for(int crank = stride; crank < world_size; crank++)
+        /* assign reverse targets to other group (world_half .. world_size - 1) based on symmetric communication pattern */
+        int max_nghb = 0;
+        for(int crank = world_half; crank < world_size; crank++)
         {
             int nghb = 0;
-            for(int target = 0; target < stride; target++)
+            for(int target = 0; target < world_half; target++)
             {    
-                for(int k = 0; k < NGHB_SIZE; k++)
+                for(int k = 0; k < nghb_size; k++)
                 {    
                     if(gtargets[target][k] == crank)
                         gtargets[crank][nghb++] = target;
                 }
             }
+            if(nghb > max_nghb)
+                max_nghb = nghb;
         }
+        rank0_printf("\tMaximum number of neighbors: %d\n", max_nghb);
     }
 
+    rank0_printf("Distributing communication targets to worker ranks.\n");
     // distribute targets to individual ranks
-    MPI_Scatter( gtargets , stride , MPI_INT , targets , stride , MPI_INT , 0, MPI_COMM_WORLD);    
+    MPI_Scatter( gtargets , world_half , MPI_INT , targets , world_half , MPI_INT , 0, MPI_COMM_WORLD);    
+
+
+#if 0
+    char ranks_fname[50];
+    sprintf(ranks_fname, "rank%d_targets.txt", rank);
+    FILE *franks = fopen(ranks_fname, "w");
+    if(franks == NULL)
+    {
+        printf("Error: unable to open file %s", ranks_fname);
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        MPI_Finalize();	    
+    }
+    for(int k = 0; k < world_half; k++)
+    {
+        int target = targets[k];
+        if(target == -1)
+            break;
+        fprintf(franks, "%d ", target);
+    }
+    fclose(franks);
+#endif
 
     /* Init arrays */
-    double *arr = (double *)malloc(SIZE*sizeof(double));
-    double *exchange_arr_send = (double *)malloc(SIZE*sizeof(double));
+    rank0_printf("Allocating arrays:\n");
+    rank0_printf("\tEach send is of size = %d bytes\n", sizeof(double)*data_elements);
+
+    double *arr = (double *)malloc(data_elements*sizeof(double));
+    if(!arr)
+    {
+        printf("Error: unable to alloc arr");
+        MPI_Finalize();
+        return -1;
+    }
+
+    double *exchange_arr_send = (double *)malloc(data_elements*sizeof(double));
+    if(!exchange_arr_send)
+    {
+        printf("Error: unable to alloc exchange_arr_send");
+        MPI_Finalize();
+        return -1;
+    }
     
     double *exchange_arr_recv[world_size];
     for(int k = 0; k < world_size; k++)
     {
-        exchange_arr_recv[k] = (double *)malloc(SIZE*sizeof(double));
+        exchange_arr_recv[k] = (double *)malloc(data_elements*sizeof(double));
         if(!exchange_arr_recv[k])
         {
             printf("Error: unable to alloc exchange_arr_recv[%u]", k);
-            MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            MPI_Finalize();	    
+            MPI_Finalize();
+            return -1;
         }
         build_array(exchange_arr_recv[k], -1);
     }
@@ -217,8 +325,8 @@ int main (int argc, char** argv)
     if(!req_arr)
     {
         printf("Error: unable to alloc req_arr");
-    	MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    	MPI_Finalize();	    
+        MPI_Finalize();
+        return -1;
     }
 
     for(unsigned int k = 0; k < nreq; k++)
@@ -226,49 +334,6 @@ int main (int argc, char** argv)
 
     double iter_times[ITERATIONS];
 
-    /* Get configuration */
-    bool onesided = false;
-    bool onesided_w = false;
-    bool twosided = false;
-    bool twosided_w = false;
-    bool persistent = false;
-    if (argc <= 1)
-    {
-        printf("No argument given, choose from: onesided: -o, onesided_w: -ow, twosided: -t, twosided_w -tw");
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-        MPI_Finalize();	    
-    }
-    if (strcmp(argv[1], "-o") == 0)
-    {
-        onesided = true;
-        rank0_printf("Using Onesided communication\n");
-    }
-    else if (strcmp(argv[1], "-ow") == 0){
-        onesided_w = true;
-        rank0_printf("Using Onesided_wait communication\n");
-    }
-    else if (strcmp(argv[1], "-t") == 0)
-    {
-        twosided = true;
-        rank0_printf("Using Twosided communication\n");
-    }
-    else if (strcmp(argv[1], "-tw") == 0)
-    {
-        twosided_w = true;
-        rank0_printf("Using Twosided_wait communication\n");
-    }
-    else if (strcmp(argv[1], "-p") == 0)
-    {
-        twosided_w = true;
-        rank0_printf("Using Persistent communication\n");
-    }    
-    else
-    {
-        printf("Incorrect argument given, choose from: onesided: -o, onesided_w: -ow, twosided: -t, twosided_w -tw, persistent -p\n");
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-        MPI_Finalize();	    
-    }
-    
     /* Init onesided or persistent*/
     MPI_Win window;
     if (onesided || onesided_w)
@@ -277,35 +342,35 @@ int main (int argc, char** argv)
     }
     else if (persistent)
     {
-        for(int k = 0; k < NGHB_SIZE; k++)
+        for(int k = 0; k < nghb_size; k++)
         {
             int target = targets[k];
-	        init_persistent(exchange_arr_send, exchange_arr_recv[target], req_arr, rank, stride, target, world_size);
+	        init_persistent(exchange_arr_send, exchange_arr_recv[target], req_arr, rank, world_half, target, world_size);
         }
     }
     
     double start, end, iter_start, iter_end, compute_time, wait_time, send_time, iter_time;
     double global_send_sum, global_compute_sum, global_wait_sum, global_iter_sum;
+    double max_send, max_compute, max_wait, max_iter;
+
+    rank0_printf("\n\nBeginning send/recv:\n");
 
     for (int i = 0; i < ITERATIONS; ++i)
     {
         iter_start = MPI_Wtime();
-        if (rank == 0)
-        {
-            rank0_printf("Iteration %d\n", i);
-        }
+        rank0_printf("Iteration %d\n", i);
         
         /* Send/recv */
         start = MPI_Wtime();
         if (onesided || onesided_w)
         {
         	MPI_Win_lock_all(MPI_MODE_NOCHECK, window);
-            for(int k = 0; k < stride; k++)
+            for(int k = 0; k < world_half; k++)
             {
                 int target = targets[k];
                 if(target == -1)
                     break;
-                exchange_onesided(exchange_arr_send, exchange_arr_recv[target], req_arr, &window, rank, stride, target, world_size);
+                exchange_onesided(exchange_arr_send, exchange_arr_recv[target], req_arr, &window, rank, world_half, target, world_size);
             }
             if (onesided_w)
             {
@@ -315,12 +380,12 @@ int main (int argc, char** argv)
         }
         else if(twosided_w || twosided)
         {
-            for(int k = 0; k < stride; k++)
+            for(int k = 0; k < world_half; k++)
             {
                 int target = targets[k];
                 if(target == -1)
                     break;
-                exchange_twosided(exchange_arr_send, exchange_arr_recv[target], req_arr, rank, stride, target, world_size);
+                exchange_twosided(exchange_arr_send, exchange_arr_recv[target], req_arr, rank, world_half, target, world_size);
             }
 
             if(twosided_w)
@@ -359,13 +424,13 @@ int main (int argc, char** argv)
         /* Check received data */
 #if 1
         int j;
-        for (int k = 0; k < stride; k++)
+        for (int k = 0; k < world_half; k++)
         {
             int target = targets[k];
             if(target == -1)
                 break;
 
-            for (j = 0; j < SIZE; j++)
+            for (j = 0; j < data_elements; j++)
             {
                 if(exchange_arr_recv[target][j] != target)
                 {
@@ -373,7 +438,7 @@ int main (int argc, char** argv)
                     break;
                 }
             }
-            // if (j == SIZE)
+            // if (j == data_elements)
             //     printf("rank %d received all data correctly from target rank %d\n", rank, target);
         }
 #endif
@@ -382,8 +447,19 @@ int main (int argc, char** argv)
         MPI_Reduce(&compute_time, &global_compute_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Reduce(&wait_time, &global_wait_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Reduce(&iter_time, &global_iter_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-        rank0_printf("AVG - Exchange time: %f  |  Compute Time: %f  |  Wait time: %f  | Iteration Time: %f\n", global_send_sum/world_size, global_compute_sum/world_size, global_wait_sum/world_size, global_iter_sum/world_size);
+        MPI_Reduce(&send_time, &max_send, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&compute_time, &max_compute, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&wait_time, &max_wait, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&iter_time, &max_iter, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        rank0_printf("\tAVG Exchange time: %f  |  AVG Compute Time: %f  |  AVG Wait time: %f  | AVG Iteration Time: %f\n", global_send_sum/world_size, global_compute_sum/world_size, global_wait_sum/world_size, global_iter_sum/world_size);
+        rank0_printf("\tMAX Exchange time: %f  |  MAX Compute Time: %f  |  MAX Wait time: %f  | MAX Iteration Time: %f\n", max_send, max_compute, max_wait, max_iter);
         iter_times[i] = global_iter_sum/world_size;
+
+#if 0
+        if(iter_time > ITER_TRSH)
+             printf("rank %d: iter_time %f > %f\n", rank, iter_time, ITER_TRSH);
+#endif
+
         MPI_Barrier(MPI_COMM_WORLD);
     }
 

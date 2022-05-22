@@ -8,7 +8,8 @@
 #include <math.h>
 #include <time.h>
 
-#define SIZE 400
+//#define SIZE 400
+#define SIZE 1200
 #define SLEEPTIME  50000
 #define ITERATIONS 300
 #define WARMUP 5
@@ -72,6 +73,7 @@ typedef struct CFDv0_cell{
 } CFDv0_cell;
 
 MPI_Datatype type_cfdcell;
+int cfdcell_size;
 
 #define rank0_printf(...) if  (rank==0) {printf(__VA_ARGS__);}
 
@@ -162,13 +164,14 @@ void build_array(CFDv0_cell* arr, int rank)
     for (int i = 0; i < SIZE; ++i)
     {
 	    arr[i].vars.id = rank;
+        arr[i].sponge_sigma = rank;
     }
 }
 
 void compute(CFDv0_cell* arr, MPI_Request* req_arr)
 {
-    // usleep(SLEEPTIME);
-    // return;
+    usleep(SLEEPTIME);
+    return;
     int flag = 0;
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -189,13 +192,23 @@ void init_onesided(CFDv0_cell* exchange_arr_send, MPI_Win* window )
     MPI_Win_create(exchange_arr_send, SIZE*sizeof(CFDv0_cell), sizeof(CFDv0_cell), MPI_INFO_NULL, MPI_COMM_WORLD, window);	
 }
 
+void init_onesided_cast(void* exchange_arr_send, MPI_Win* window )
+{
+    MPI_Win_create(exchange_arr_send, SIZE*sizeof(CFDv0_cell), 1, MPI_INFO_NULL, MPI_COMM_WORLD, window);	
+}
+
 void exchange_onesided(CFDv0_cell* exchange_arr_send, CFDv0_cell* exchange_arr_recv,
 		       MPI_Request* req_arr, MPI_Win* window, int rank, int stride, int target, int world_size)
 {
     int ret;
-    {
-        MPI_Rget(exchange_arr_recv, SIZE, type_cfdcell, target, 0, SIZE, type_cfdcell, *window, &req_arr[target]);
-    }
+    MPI_Rget(exchange_arr_recv, SIZE, type_cfdcell, target, 0, SIZE, type_cfdcell, *window, &req_arr[target]);
+}
+
+void exchange_onesided_cast(void* exchange_arr_send, void* exchange_arr_recv,
+		       MPI_Request* req_arr, MPI_Win* window, int rank, int stride, int target, int world_size)
+{
+    int ret;
+    MPI_Rget((char *) exchange_arr_recv, SIZE*sizeof(CFDv0_cell), MPI_CHAR, target, 0, SIZE*sizeof(CFDv0_cell), MPI_CHAR, *window, &req_arr[target]);
 }
 
 void init_persistent(CFDv0_cell* exchange_arr_send, CFDv0_cell* exchange_arr_recv, MPI_Request* req_arr, int rank, int stride, int target, int world_size)
@@ -311,6 +324,26 @@ int main (int argc, char** argv)
     // distribute targets to individual ranks
     MPI_Scatter( gtargets , stride , MPI_INT , targets , stride , MPI_INT , 0, MPI_COMM_WORLD);    
 
+#if 0
+    char ranks_fname[50];
+    sprintf(ranks_fname, "rank%d_targets.txt", rank);
+    FILE *franks = fopen(ranks_fname, "w");
+    if(franks == NULL)
+    {
+        printf("Error: unable to open file %s", ranks_fname);
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        MPI_Finalize();	    
+    }
+    for(int k = 0; k < stride; k++)
+    {
+        int target = targets[k];
+        if(target == -1)
+            break;
+        fprintf(franks, "%d ", target);
+    }
+    fclose(franks);
+#endif
+
     /* Init arrays */
     CFDv0_cell *arr = (CFDv0_cell *)malloc(SIZE*sizeof(CFDv0_cell));
     CFDv0_cell *exchange_arr_send = (CFDv0_cell *)malloc(SIZE*sizeof(CFDv0_cell));
@@ -333,7 +366,6 @@ int main (int argc, char** argv)
 
     init_mpi_types(exchange_arr_send);
 
-    int cfdcell_size;
     MPI_Type_size(type_cfdcell, &cfdcell_size);
     rank0_printf("Each send is of size = %d, MPI_size = %d\n", sizeof(CFDv0_cell)*SIZE, cfdcell_size*SIZE);
 
@@ -354,13 +386,14 @@ int main (int argc, char** argv)
 
     /* Get configuration */
     bool onesided = false;
+    bool onesided_c = false;
     bool onesided_w = false;
     bool twosided = false;
     bool twosided_w = false;
     bool persistent = false;
     if (argc <= 1)
     {
-        printf("No argument given, choose from: onesided: -o, onesided_w: -ow, twosided: -t, twosided_w -tw");
+        printf("No argument given, choose from: onesided: -o, onesided_c: -oc, onesided_w: -ow, twosided: -t, twosided_w -tw");
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         MPI_Finalize();	    
     }
@@ -368,6 +401,10 @@ int main (int argc, char** argv)
     {
         onesided = true;
         rank0_printf("Using Onesided communication\n");
+    }
+    else if (strcmp(argv[1], "-oc") == 0){
+        onesided_c = true;
+        rank0_printf("Using Onesided_cast communication\n");
     }
     else if (strcmp(argv[1], "-ow") == 0){
         onesided_w = true;
@@ -398,9 +435,9 @@ int main (int argc, char** argv)
     /* Init onesided or persistent*/
     MPI_Win window;
     if (onesided || onesided_w)
-    {
 	    init_onesided(exchange_arr_send, &window);
-    }
+    else if (onesided_c)
+	    init_onesided_cast(exchange_arr_send, &window);
     else if (persistent)
     {
         for(int k = 0; k < NGHB_SIZE; k++)
@@ -439,6 +476,17 @@ int main (int argc, char** argv)
                 MPI_Win_unlock_all(window);
             }
         }
+        else if(onesided_c)
+        {
+        	MPI_Win_lock_all(MPI_MODE_NOCHECK, window);
+            for(int k = 0; k < stride; k++)
+            {
+                int target = targets[k];
+                if(target == -1)
+                    break;
+                exchange_onesided_cast(exchange_arr_send, exchange_arr_recv[target], req_arr, &window, rank, stride, target, world_size);
+            }
+        }
         else if(twosided_w || twosided)
         {
             for(int k = 0; k < stride; k++)
@@ -467,7 +515,7 @@ int main (int argc, char** argv)
 
         /* Waitall */
         start = MPI_Wtime();
-        if (onesided)
+        if (onesided || onesided_c)
         {
             MPI_Waitall(nreq, req_arr, MPI_STATUSES_IGNORE);
             MPI_Win_unlock_all(window);
@@ -493,7 +541,7 @@ int main (int argc, char** argv)
 
             for (j = 0; j < SIZE; j++)
             {
-                if(exchange_arr_recv[target][j].vars.id != target)
+                if(exchange_arr_recv[target][j].vars.id != target || exchange_arr_recv[target][j].sponge_sigma != target)
                 {
                     printf("rank %d, target %d: inconsitency in recv buffer at position %d = %f (supposed to be %f)\n", rank, target, j, exchange_arr_recv[target][j], target);
                     break;
@@ -521,7 +569,7 @@ int main (int argc, char** argv)
     rank0_printf("Average iteration time: %f\n", global_sum / (ITERATIONS - WARMUP));  
 
     /* Cleanup */
-    if (onesided || onesided_w){
+    if (onesided || onesided_w || onesided_c){
 	    MPI_Win_free(&window);
     }
   
