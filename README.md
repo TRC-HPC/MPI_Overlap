@@ -3,7 +3,7 @@ Build via:
 make
 
 Invoke using:
-mpirun --hostfile hostfile --bind-to core --mca pml ucx -x UCX_IB_GID_INDEX=0 -x UCX_NET_DEVICES=mlx5_0:1,mlx5_2:1 -x UCX_TLS=self,sm,ud,rc ./overlap_regdata ...
+mpirun --hostfile hostfile --bind-to core --mca pml ucx -x UCX_IB_GID_INDEX=0 -x UCX_TLS=self,sm,ud,rc ./overlap_regdata ...
 
 usage:
 ./overlap_regdata -algorithm #data_elements #neighbors
