@@ -10,7 +10,10 @@ usage:
 
 where algorithm is one of:
 -t: two-sided non-blocking comm. + wait for completion after compute (overlap),
+
 -tw: two-sided comm. with immediate wait and then compute,
+
 -o: one-sided asynchronous comm. + wait for completion after compute (overlap),
+
 -ow: one-sided comm. with immediate wait and then compute
 
