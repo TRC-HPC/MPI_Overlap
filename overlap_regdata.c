@@ -8,11 +8,11 @@
 #include <math.h>
 #include <time.h>
 
-#define SLEEPTIME  50000
+#define SLEEPTIME  50000		// usec
 #define ITER_TRSH  1.0
 #define ITERATIONS 200
 #define WARMUP 5
-#define COMP_ITRS 250
+#define COMP_ITRS 3000
 #define MAX_MPI_RANKS 		1000
 #define MAX_MPI_NEIGHBORS 	1000
 
@@ -35,21 +35,18 @@ void build_array(double* arr, int rank)
     }
 }
 
-void compute(double* array, MPI_Request* req_arr)
+void compute(int* targets, double* array, MPI_Request* req_arr)
 {
-    usleep(SLEEPTIME);
-    return;
+    // usleep(SLEEPTIME);
+    // return;
 
     int flag = 0;
-    double val = array[0];
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
-    for (int  i= 0; i < COMP_ITRS; ++i)
+    for (int  i = 0; i < COMP_ITRS; i++)
     {
-        //MPI_Iprobe(target, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, MPI_STATUS_IGNORE);
-        //MPI_Testall(2, req_arr, &flag, MPI_STATUSES_IGNORE);
-        for (int j = 0; j < data_elements; ++j)
+        for (int j = 0; j < data_elements; j++)
         {
             array[j] = rank;
         }
@@ -62,7 +59,7 @@ void init_onesided(double* exchange_arr_send, MPI_Win* window )
 }
 
 void exchange_onesided(double* exchange_arr_send, double* exchange_arr_recv,
-		       MPI_Request* req_arr, MPI_Win* window, int rank, int world_half, int target, int world_size)
+        		       MPI_Request* req_arr, MPI_Win* window, int rank, int world_half, int target, int world_size)
 {
     int ret;
     {
@@ -183,7 +180,7 @@ int do_communication_pattern(int *targets, int world_size, int world_half, int r
     {
         rank0_printf("Assigning communication targets:\n");
         srand(time(NULL));
-        /* each rank in the first group (0 .. world_half) picks nghb_size random ranks from the other group (world_half .. world_size - 1) */
+        /* each rank in the first group (0 .. world_half - 1) picks nghb_size random ranks from the other group (world_half .. world_size - 1) */
         for(int crank = 0; crank < world_half; crank++)
         {
             for(int k = 0; k < nghb_size; k++)
@@ -204,6 +201,7 @@ int do_communication_pattern(int *targets, int world_size, int world_half, int r
         }
 
         /* assign reverse targets to other group (world_half .. world_size - 1) based on symmetric communication pattern */
+        /* note: certain ranks will have to communicate with more than nghb_size neighbors, due to random assignments of first group */
         int max_nghb = 0;
         for(int crank = world_half; crank < world_size; crank++)
         {
@@ -227,6 +225,7 @@ int do_communication_pattern(int *targets, int world_size, int world_half, int r
     MPI_Scatter( gtargets , world_half , MPI_INT , targets , world_half , MPI_INT , 0, MPI_COMM_WORLD);    
 
 
+    // output targets to file
 #if 0
     char ranks_fname[50];
     sprintf(ranks_fname, "rank%d_targets.txt", rank);
@@ -338,7 +337,7 @@ int main (int argc, char** argv)
         req_arr[k] = MPI_REQUEST_NULL;
 
 
-    double iter_times[ITERATIONS];
+    double avg_iter_times[ITERATIONS];
 
     /* Init onesided or persistent*/
     MPI_Win window;
@@ -355,11 +354,12 @@ int main (int argc, char** argv)
         }
     }
     
-    double start, end, iter_start, iter_end, compute_time, wait_time, send_time, iter_time;
-    double global_send_sum, global_compute_sum, global_wait_sum, global_iter_sum;
+    double start, end, iter_start, iter_end, compute_time, wait_time, send_time, iter_time, global_start, global_end;
+    double global_send_sum, global_compute_sum, global_wait_sum, global_iter_sum, global_max_iter = 0;
     double max_send, max_compute, max_wait, max_iter;
 
     rank0_printf("\n\nBeginning send/recv:\n");
+    global_start = MPI_Wtime();
 
     for (int i = 0; i < ITERATIONS; ++i)
     {
@@ -406,7 +406,7 @@ int main (int argc, char** argv)
         
         /* Compute */
         start = MPI_Wtime();
-        compute(arr, req_arr);
+        compute(targets, arr, req_arr);
         end = MPI_Wtime();
         compute_time = end - start;
 
@@ -457,10 +457,13 @@ int main (int argc, char** argv)
         MPI_Reduce(&compute_time, &max_compute, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         MPI_Reduce(&wait_time, &max_wait, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         MPI_Reduce(&iter_time, &max_iter, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-        rank0_printf("\tAVG Exchange time: %f  |  AVG Compute Time: %f  |  AVG Wait time: %f  | AVG Iteration Time: %f\n", global_send_sum/world_size, global_compute_sum/world_size, global_wait_sum/world_size, global_iter_sum/world_size);
-        rank0_printf("\tMAX Exchange time: %f  |  MAX Compute Time: %f  |  MAX Wait time: %f  | MAX Iteration Time: %f\n", max_send, max_compute, max_wait, max_iter);
-        iter_times[i] = global_iter_sum/world_size;
-
+        rank0_printf("\tAvg MPI Exchange Time: %.6e  +  Avg Compute Time: %.6e  +  Avg MPI Wait time: %.6e  ~ Avg Iteration Time: %.6e\n", global_send_sum/world_size, global_compute_sum/world_size, global_wait_sum/world_size, global_iter_sum/world_size);
+        rank0_printf("\tMax MPI Exchange Time: %.6e  +  Max Compute Time: %.6e  +  Max MPI Wait time: %.6e  ~ Max Iteration Time: %.6e\n", max_send, max_compute, max_wait, max_iter);
+        
+        avg_iter_times[i] = global_iter_sum / world_size;
+        if(max_iter > global_max_iter && i >= WARMUP)
+            global_max_iter = max_iter;
+        
 #if 0
         if(iter_time > ITER_TRSH)
              printf("rank %d: iter_time %f > %f\n", rank, iter_time, ITER_TRSH);
@@ -472,10 +475,14 @@ int main (int argc, char** argv)
     /* Average iteration time */
     double global_sum = 0;
     for (int i = WARMUP; i < ITERATIONS; ++i){
-	    global_sum += iter_times[i];
+	    global_sum += avg_iter_times[i];
     }
-    rank0_printf("Average iteration time: %f\n", global_sum / (ITERATIONS - WARMUP));  
+    rank0_printf("Avg iteration time of %d iterations: %.6e\n", ITERATIONS, global_sum / (ITERATIONS - WARMUP));  
+    rank0_printf("Max iteration time of %d iterations: %.6e\n", ITERATIONS, global_max_iter);  
 
+    global_end = MPI_Wtime();
+    rank0_printf("Total time elapsed: %.6e\n", global_end - global_start);
+    
     /* Cleanup */
     if (onesided || onesided_w){
 	    MPI_Win_free(&window);
