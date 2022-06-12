@@ -29,6 +29,7 @@ Invoke overlap_regdata on 5 nodes using one-sided communication, with UCX and th
 mpirun --hostfile hostfile --bind-to core --mca pml ucx -x UCX_IB_GID_INDEX=0 -x UCX_TLS=self,sm,rc ./overlap_regdata -o 100000 6
 
 Demonstrate consistent avg and max iteration times of less than 0.12 seconds for at least three consecutive invokations of overlap_regdata with one-sided communication
+
 (Bonus) demonstrate computation-communication overlap by comparing runs with -ow (immediate wait) and -o (delayed wait)
 
 ## Hackathon assignment #3:
