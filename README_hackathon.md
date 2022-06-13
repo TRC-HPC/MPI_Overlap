@@ -1,4 +1,13 @@
 # MPI_Overlap
+Prerequisites:
+  - [UCX](https://github.com/openucx/ucx)
+  - [Open MPI](https://github.com/open-mpi/ompi.git) compiled with UCX support (./configure --prefix=*ompi-install-path* --with-ucx=*ucx-install-path*)
+
+Add UCX and Open MPI binaries and libraries to respective paths in bashrc:
+```
+export PATH=/path/to/ucx/bin:/path/to/ompi/bin:${PATH}
+export LD_LIBRARY_PATH=/path/to/ucx/lib:/path/to/ompi/lib:${LD_LIBRARY_PATH}
+```
 Build via:
 make
 
