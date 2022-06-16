@@ -6,36 +6,40 @@ The following libraries are required:
   - [Open MPI](https://github.com/open-mpi/ompi.git) compiled with UCX support (./configure --prefix=*ompi-install-path* --with-ucx=*ucx-install-path*)
 
 Alternatively, you can use the pre-built UCX and OpenMPI binaries and libraries by adding the following to your ~/.bashrc:
-  - Team 1:
-  ```
-  HACK_DIR=/mnt/beegfs/hackathon/team1
-  export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
-  export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
-  ```
+- Team 1:
+```
+HACK_DIR=/mnt/beegfs/hackathon/team1
+export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
+export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
+```
 
-  - Team 2:
-  ```
-  HACK_DIR=/mnt/beegfs/hackathon/team2
-  export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
-  export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
-  ```
+- Team 2:
+```
+HACK_DIR=/mnt/beegfs/hackathon/team2
+export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
+export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
+```
 
-  - Team 3:
-  ```
-  HACK_DIR=/mnt/central/hackathon/bin
-  export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
-  export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
-  ```
+- Team 3:
+```
+HACK_DIR=/mnt/central/hackathon/bin
+export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
+export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
+```
 
 ## Obtaining the code
-git clone https://github.com/TRC-HPC/MPI_Overlap
+git clone https://github.com/TRC-HPC/MPI_Overlap -b hackathon
 
 ## Running the code
 Build via:
+```
 make
+```
 
 usage:
+```
 ./hackathon #commtype #data_elements #neighbors
+```
 
 where commtype is one of:
 
@@ -52,7 +56,9 @@ where commtype is one of:
 
 Invoke hackathon on 5 nodes using two-sided communication, with UCX and the UD/RC protocols, for a buffer size of 400 kb and at least 6 nominal neighbors, e.g.:
 
+```
 mpirun --hostfile hostfile --bind-to core --mca pml ucx -x UCX_IB_GID_INDEX=0 -x UCX_TLS=self,sm,ud,rc ./hackathon -t 50000 6
+```
 
 Demonstrate consistent avg and max iteration times of less than 0.1 seconds for at least three consecutive invokations of hackathon with two-sided communication
 
@@ -60,7 +66,9 @@ Demonstrate consistent avg and max iteration times of less than 0.1 seconds for 
 
 Invoke hackathon on 5 nodes using one-sided communication, with UCX and the RC protocol, for a buffer size of 800 kb and at least 6 nominal neighbors, e.g.:
 
+```
 mpirun --hostfile hostfile --bind-to core --mca pml ucx -x UCX_IB_GID_INDEX=0 -x UCX_TLS=self,sm,rc ./hackathon -o 100000 6
+```
 
 Demonstrate consistent avg and max iteration times of less than 0.12 seconds for at least three consecutive invokations of hackathon with one-sided communication
 
@@ -70,7 +78,9 @@ Demonstrate consistent avg and max iteration times of less than 0.12 seconds for
 
 Invoke hackathon on 5 nodes using one-sided communication, with UCX and the RC protocol, for a buffer size of 8 Mb and at least 6 nominal neighbors, e.g.:
 
+```
 mpirun --hostfile hostfile --bind-to core --mca pml ucx -x UCX_IB_GID_INDEX=0 -x UCX_TLS=self,sm,rc ./hackathon -o 1000000 6
+```
 
 Resolve ucx errors (Transport retry count exceeded) and demonstrate consistent iteration times for this scenario
 
