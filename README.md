@@ -89,8 +89,10 @@ Resolve ucx errors (Transport retry count exceeded) and demonstrate consistent i
 ## Debugging (Advanced)
 To debug the code, first make sure to change the FLAGS in Makefile to:
 ```
-FLAGS="-g -O0 -lm" to disable optimizations.
+FLAGS="-g -O0 -lm"
 ```
+to disable optimizations.
+
 Then, build debug versions of ucx and openmpi, or change the path in your ~/.bashrc to the pre-built development versions:
 ```
 export PATH=${HACK_DIR}/ucx-devel/bin:${HACK_DIR}/ompi-debug/bin:${PATH}
