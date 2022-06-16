@@ -28,7 +28,10 @@ export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PAT
 ```
 
 ## Obtaining the code
+The code may be obtained from:
+```
 git clone https://github.com/TRC-HPC/MPI_Overlap -b hackathon
+```
 
 ## Running the code
 Build via:
