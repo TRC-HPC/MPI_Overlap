@@ -5,7 +5,7 @@ The following libraries are required:
   - [UCX](https://github.com/openucx/ucx)
   - [Open MPI](https://github.com/open-mpi/ompi.git) compiled with UCX support (./configure --prefix=*ompi-install-path* --with-ucx=*ucx-install-path*)
 
-Alternatively, you can use the pre-built UCX and OpenMPI binaries and libraries by adding the following to your ~/.bashrc:
+Alternatively, you can use the pre-built UCX and OpenMPI libraries by adding the following to your ~/.bashrc:
 - Team 1:
 ```
 HACK_DIR=/mnt/beegfs/hackathon/team1
