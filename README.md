@@ -99,6 +99,9 @@ export PATH=${HACK_DIR}/ucx-devel/bin:${HACK_DIR}/ompi-debug/bin:${PATH}
 export LD_LIBRARY_PATH=${HACK_DIR}/ucx-devel/lib:${HACK_DIR}/ompi-debug/lib:${LD_LIBRARY_PATH}
 ```
 Debugging can be accomplished by attaching to one (or all) of the MPI processes using gdb, as described in:
-(https://www.open-mpi.org/faq/?category=debugging)
+
+https://www.open-mpi.org/faq/?category=debugging
+
 Or by using VS code on a remote target machine, as shown in:
-(https://iamsorush.com/posts/debug-mpi-vs-code/)
+
+https://iamsorush.com/posts/debug-mpi-vs-code/
