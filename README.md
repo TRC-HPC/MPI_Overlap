@@ -51,7 +51,6 @@ where commtype is one of:
 
   -ow: one-sided comm. with immediate wait and then compute
 
-
 ## Hackathon assignment #1:
 
 Invoke hackathon on 5 nodes using two-sided communication, with UCX and the UD/RC protocols, for a buffer size of 400 kb and at least 6 nominal neighbors, e.g.:
@@ -84,3 +83,17 @@ mpirun --hostfile hostfile --bind-to core --mca pml ucx -x UCX_IB_GID_INDEX=0 -x
 
 Resolve ucx errors (Transport retry count exceeded) and demonstrate consistent iteration times for this scenario
 
+## Debugging (Advanced)
+To debug the code, first make sure to change the FLAGS in Makefile to:
+```
+FLAGS="-g -O0 -lm" to disable optimizations.
+```
+Then, build debug versions of ucx and openmpi, or change the path in your ~/.bashrc to the pre-built development versions:
+```
+export PATH=${HACK_DIR}/ucx-devel/bin:${HACK_DIR}/ompi-debug/bin:${PATH}
+export LD_LIBRARY_PATH=${HACK_DIR}/ucx-devel/lib:${HACK_DIR}/ompi-debug/lib:${LD_LIBRARY_PATH}
+```
+Debugging can be accomplished by attaching to one (or all) of the MPI processes using gdb, as described in:
+(https://www.open-mpi.org/faq/?category=debugging)
+Or by using VS code on a remote target machine, as shown in:
+(https://iamsorush.com/posts/debug-mpi-vs-code/)
