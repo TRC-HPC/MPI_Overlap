@@ -8,14 +8,14 @@ The following libraries are required:
 Alternatively, you can use the pre-built UCX and OpenMPI libraries by adding the following to your ~/.bashrc:
 - Team 1:
 ```
-HACK_DIR=/mnt/beegfs/hackathon/team1
+HACK_DIR=/mnt/beegfs/hackathon/team1/bin
 export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
 export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
 ```
 
 - Team 2:
 ```
-HACK_DIR=/mnt/beegfs/hackathon/team2
+HACK_DIR=/mnt/beegfs/hackathon/team2/bin
 export PATH=${HACK_DIR}/ucx/bin:${HACK_DIR}/ompi/bin:${PATH}
 export LD_LIBRARY_PATH=${HACK_DIR}/ucx/lib:${HACK_DIR}/ompi/lib:${LD_LIBRARY_PATH}
 ```
