@@ -184,6 +184,8 @@ int do_communication_pattern(int *pTargetList, int nRank)
 
     int nPossibleTargetList[g_nWorldHalfSize];
 
+    int nRemainingTargetCount = 0;
+
     // rank 0 determines the communication pattern
     // Each rank in the first group (0 .. g_nWorldHalfSize - 1) picks g_nNeighbourCount random ranks from the other group (g_nWorldHalfSize .. g_nWorldSize - 1)
     if(nRank == 0)
@@ -195,12 +197,19 @@ int do_communication_pattern(int *pTargetList, int nRank)
         for(int crank = 0; crank < g_nWorldHalfSize; crank++)
         {
             // Initialize possible options
-            for (int i = 0; i < g_nWorldHalfSize; i++)
-                nPossibleTargetList[i] = i + g_nWorldHalfSize;
+            //for (int i = 0; i < g_nWorldHalfSize; i++)
+            //    nPossibleTargetList[i] = i + g_nWorldHalfSize;
 
             // Try to pick g_nNeighbourCount different neighbours from second group
             for(int k = 0; k < g_nNeighbourCount; k++)
             {
+                // Need more targets
+                if (nRemainingTargetCount == 0)
+                {
+                    for (int i = 0; i < g_nWorldHalfSize; i++)
+                        nPossibleTargetList[i] = i + g_nWorldHalfSize;
+                    nRemainingTargetCount = g_nWorldHalfSize;
+                }
                 // Random Index
                 const int nIndex = rand() % (g_nWorldHalfSize - k);
 
@@ -209,6 +218,8 @@ int do_communication_pattern(int *pTargetList, int nRank)
 
                 // Place the last index instead
                 nPossibleTargetList[nIndex] = nPossibleTargetList[g_nWorldHalfSize - k - 1];
+                nPossibleTargetList[nIndex] = nPossibleTargetList[nRemainingTargetCount - 1];
+                nRemainingTargetCount--;
                     
                 // Get Random Target
                 gtargets[crank][k] = nTarget;
