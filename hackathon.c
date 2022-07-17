@@ -31,11 +31,16 @@ int g_nNeighbourCount = 0;
 int g_nWorldSize = 0;
 int g_nWorldHalfSize = 0;
 
+// Group
+MPI_Group g_Group;
+
 // Communication Type
 typedef enum
 {
-    COMM_ONESIDED_NONBLOCKING = 0,
-    COMM_ONESIDED_BLOCKING,
+    COMM_ONESIDED_PASSIVE_NONBLOCKING = 0,
+    COMM_ONESIDED_PASSIVE_BLOCKING,
+    COMM_ONESIDED_DYNAMIC_NONBLOCKING,
+    COMM_ONESIDED_DYNAMIC_BLOCKING,
     COMM_TWOSIDED_NONBLOCKING,
     COMM_TWOSIDED_BLOCKING,
     COMM_UNKNOWN,
@@ -69,18 +74,38 @@ void init_onesided(double* pExchangeArraySend, MPI_Win* window )
     MPI_Win_create(pExchangeArraySend, g_nDataElementCount*sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, window);	
 }
 
-// Exchange one-sided data
-void exchange_onesided(double* pExchangeArrayRecv,
-        		       MPI_Request* req_arr, MPI_Win* window, int target)
+void init_group(int* nTargetList)
+{
+    // Get Neighbour Count
+    int nNeighborCount = 0;
+    for (nNeighborCount = 0; nNeighborCount < g_nWorldHalfSize; nNeighborCount++)
+        if (nTargetList[nNeighborCount] == -1)
+            break;
+    
+    // Create Group
+    MPI_Group comm_group;
+    MPI_Comm_group(MPI_COMM_WORLD, &comm_group);
+    MPI_Group_incl(comm_group, nNeighborCount, nTargetList, &g_Group);
+    MPI_Group_free(&comm_group);
+}
+
+// Exchange one-sided passive data
+void exchange_onesided_passive(double* pExchangeArrayRecv, MPI_Request* req_arr, MPI_Win* window, int target)
 {
     MPI_Rget(pExchangeArrayRecv, g_nDataElementCount, MPI_DOUBLE, target, 0, g_nDataElementCount, MPI_DOUBLE, *window, &req_arr[target]);
+}
+
+// Exchange one-sided dynamic data
+void exchange_onesided_dynamic(double* pExchangeArrayRecv, MPI_Win* window, int target)
+{
+    MPI_Get(pExchangeArrayRecv, g_nDataElementCount, MPI_DOUBLE, target, 0, g_nDataElementCount, MPI_DOUBLE, *window);
 }
 
 // Exchange two-sided nonblocking
 void exchange_twosided(double* pExchangeArraySend, double* pExchangeArrayRecv, MPI_Request* req_arr, int nRank, int nTarget)
 {
-    const int nSendTag = MAX_MPI_NEIGHBORS * nRank + nTarget;		
-    const int nRecvTag = nRank + MAX_MPI_NEIGHBORS * nTarget;
+    const int nSendTag = 0;		
+    const int nRecvTag = 0;
 
     MPI_Irecv(pExchangeArrayRecv, g_nDataElementCount, MPI_DOUBLE, nTarget, nRecvTag, MPI_COMM_WORLD, &req_arr[MAX_MPI_NEIGHBORS + nTarget]);
     MPI_Isend(pExchangeArraySend, g_nDataElementCount, MPI_DOUBLE, nTarget, nSendTag, MPI_COMM_WORLD, &req_arr[nTarget]);
@@ -97,14 +122,22 @@ int parse_commandline(int argc, char** argv, int nRank)
         rank0_printf("Usage: %s %s %s %s\n", argv[0], "-algorithm (o,ow,t,tw)", "#data_elements", "#neighbors");
         return -1;
     }
-    if (strcmp(argv[1], "-o") == 0)
+    if (strcmp(argv[1], "-op") == 0)
     {
-        g_eCommType = COMM_ONESIDED_NONBLOCKING;
-        rank0_printf("\tUsing Onesided communication\n");
+        g_eCommType = COMM_ONESIDED_PASSIVE_NONBLOCKING;
+        rank0_printf("\tUsing Onesided-passive nonblocking communication\n");
     }
-    else if (strcmp(argv[1], "-ow") == 0){
-        g_eCommType = COMM_ONESIDED_BLOCKING;        
-        rank0_printf("\tUsing Onesided_wait communication\n");
+    else if (strcmp(argv[1], "-opw") == 0){
+        g_eCommType = COMM_ONESIDED_PASSIVE_BLOCKING;        
+        rank0_printf("\tUsing Onesided-passive blocking communication\n");
+    }
+    else if (strcmp(argv[1], "-od") == 0){
+        g_eCommType = COMM_ONESIDED_DYNAMIC_NONBLOCKING;
+        rank0_printf("\tUsing Onesided-dynamic nonblocking communication\n");
+    }
+    else if (strcmp(argv[1], "-odw") == 0){
+        g_eCommType = COMM_ONESIDED_DYNAMIC_BLOCKING;
+        rank0_printf("\tUsing Onesided-dynamic blocking communication\n");
     }
     else if (strcmp(argv[1], "-t") == 0)
     {
@@ -259,7 +292,7 @@ int main (int argc, char** argv)
 
     // Init arrays
     rank0_printf("Allocating arrays:\n");
-    rank0_printf("\tEach array (send/recv) is of size = %d bytes\n", sizeof(double)*g_nDataElementCount);
+    rank0_printf("\tEach array (send/recv) is of size = %ld bytes\n", sizeof(double)*g_nDataElementCount);
 
     // Compute array
     double *pComputeArray = (double *)malloc(g_nDataElementCount*sizeof(double));
@@ -313,10 +346,16 @@ int main (int argc, char** argv)
     double dAverageIterTimes[ITERATIONS];
 
     // Initiailize one-sided
-    const bool bIsOneSided = (g_eCommType == COMM_ONESIDED_BLOCKING || g_eCommType == COMM_ONESIDED_NONBLOCKING);
+    const bool bIsOneSidedPassive = (g_eCommType == COMM_ONESIDED_PASSIVE_BLOCKING || g_eCommType == COMM_ONESIDED_PASSIVE_NONBLOCKING);
+    const bool bIsOneSidedDynamic = (g_eCommType == COMM_ONESIDED_DYNAMIC_BLOCKING || g_eCommType == COMM_ONESIDED_DYNAMIC_NONBLOCKING);
+    const bool bIsOneSided = bIsOneSidedPassive || bIsOneSidedDynamic;
     MPI_Win window;
     if (bIsOneSided)
 	    init_onesided(pExchangeArraySend, &window);
+
+    // Create Group
+    if (bIsOneSidedDynamic)
+        init_group(nTargetList);
     
     // Working variables
     double start, end, iter_start, iter_end, compute_time, wait_time, send_time, iter_time, global_start, global_end;
@@ -333,7 +372,7 @@ int main (int argc, char** argv)
         
         /* Send/recv */
         start = MPI_Wtime();
-        if (bIsOneSided)
+        if (bIsOneSidedPassive)
         {
         	MPI_Win_lock_all(MPI_MODE_NOCHECK, window);
             for(int k = 0; k < g_nWorldHalfSize; k++)
@@ -341,12 +380,38 @@ int main (int argc, char** argv)
                 const int nTarget = nTargetList[k];
                 if(nTarget == -1)
                     break;
-                exchange_onesided(pExchangeArrayRecvList[nTarget], req_arr, &window, nTarget);
+                exchange_onesided_passive(pExchangeArrayRecvList[nTarget], req_arr, &window, nTarget);
             }
-            if (g_eCommType == COMM_ONESIDED_BLOCKING)
+            if (g_eCommType == COMM_ONESIDED_PASSIVE_BLOCKING)
             {
                 MPI_Waitall(nreq, req_arr, MPI_STATUSES_IGNORE);
                 MPI_Win_unlock_all(window);
+            }
+        }
+        else if (bIsOneSidedDynamic)
+        {
+            // Wait for previous iteration completion
+            if (i > 0 && g_eCommType == COMM_ONESIDED_DYNAMIC_NONBLOCKING)
+                MPI_Win_wait(window);
+
+            // Post New Window
+            MPI_Win_post(g_Group, MPI_MODE_NOPUT, window);
+
+            // Start with neighbours window
+            MPI_Win_start(g_Group, 0, window);
+
+            // Get Data
+            for(int k = 0; k < g_nWorldHalfSize; k++)
+            {
+                const int nTarget = nTargetList[k];
+                if(nTarget == -1)
+                    break;
+                exchange_onesided_dynamic(pExchangeArrayRecvList[nTarget], &window, nTarget);
+            }
+            if (g_eCommType == COMM_ONESIDED_DYNAMIC_BLOCKING)
+            {
+                MPI_Win_complete(window);
+                MPI_Win_wait(window);
             }
         }
         else
@@ -363,6 +428,7 @@ int main (int argc, char** argv)
             if(g_eCommType == COMM_TWOSIDED_BLOCKING)
                 MPI_Waitall(nreq, req_arr, MPI_STATUSES_IGNORE);
         }
+
         end = MPI_Wtime();
         send_time = end - start;
         
@@ -374,10 +440,14 @@ int main (int argc, char** argv)
 
         // Waitall
         start = MPI_Wtime();
-        if (g_eCommType == COMM_ONESIDED_NONBLOCKING)
+        if (g_eCommType == COMM_ONESIDED_PASSIVE_NONBLOCKING)
         {
             MPI_Waitall(nreq, req_arr, MPI_STATUSES_IGNORE);
             MPI_Win_unlock_all(window);
+        }
+        else if (g_eCommType == COMM_ONESIDED_PASSIVE_NONBLOCKING)
+        {
+            MPI_Win_complete(window);
         }
         else if (g_eCommType == COMM_TWOSIDED_NONBLOCKING) {
             MPI_Waitall(nreq, req_arr, MPI_STATUSES_IGNORE);
@@ -402,7 +472,7 @@ int main (int argc, char** argv)
             {
                 if(pExchangeArrayRecvList[nTarget][j] != nTarget)
                 {
-                    printf("rank %d, target %d: inconsitency in recv buffer at position %d = %f (supposed to be %f)\n", nRank, nTarget, j, pExchangeArrayRecvList[nTarget][j], nTarget);
+                    printf("rank %d, target %d: inconsitency in recv buffer at position %d = %f (supposed to be %d)\n", nRank, nTarget, j, pExchangeArrayRecvList[nTarget][j], nTarget);
                     break;
                 }
             }
@@ -428,6 +498,10 @@ int main (int argc, char** argv)
         
         MPI_Barrier(MPI_COMM_WORLD);
     }
+
+    // Wait for last iteration completion
+    if (g_eCommType == COMM_ONESIDED_DYNAMIC_NONBLOCKING)
+        MPI_Win_wait(window);
 
     // Average iteration time
     double global_sum = 0;
